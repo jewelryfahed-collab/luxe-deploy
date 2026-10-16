@@ -1,19 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { queryOptions } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
 import heroImg from "@/assets/hero.jpg";
 import earringsImg from "@/assets/earrings.jpg";
 import necklaceImg from "@/assets/necklace.jpg";
 import braceletImg from "@/assets/bracelet.jpg";
+import { getBannersFn, getCategoriesFn, getProductsFn, getSessionFn, getSettingsFn } from "./api.functions";
+import type { Category, Lang, Metal, Product, SessionUser, SiteSettings } from "./types";
 
-export type Product = Database["public"]["Tables"]["products"]["Row"] & {
-  categories?: { slug: string; name: string } | null;
-};
-export type Category = Database["public"]["Tables"]["categories"]["Row"];
-export type Banner = Database["public"]["Tables"]["banners"]["Row"];
-export type SiteSettings = Database["public"]["Tables"]["site_settings"]["Row"];
-export type Metal = Database["public"]["Enums"]["metal_type"];
+export type { Category, Product, SessionUser, SiteSettings } from "./types";
+export type { Metal } from "./types";
 
 /** Fallback business constants, used when settings haven't loaded. */
 export const BUSINESS = {
@@ -50,42 +45,34 @@ export const usd = (n: number) =>
 export const lbp = (n: number, rate: number) =>
   `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n * rate)} LBP`;
 
+export function currentLang(): Lang {
+  if (typeof window === "undefined") return "en";
+  const l = localStorage.getItem("fahed-lang");
+  return l === "ar" || l === "fr" ? l : "en";
+}
+
 // ---------- Queries ----------
-export const productsQuery = queryOptions({
-  queryKey: ["products"],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*, categories(slug,name)")
-      .eq("is_active", true)
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return data as Product[];
-  },
-});
-export const categoriesQuery = queryOptions({
-  queryKey: ["categories"],
-  queryFn: async () => {
-    const { data, error } = await supabase.from("categories").select("*").order("sort_order");
-    if (error) throw error;
-    return data;
-  },
-});
+export const productsQuery = () =>
+  queryOptions({
+    queryKey: ["products", currentLang()],
+    queryFn: () => getProductsFn({ data: currentLang() }) as Promise<Product[]>,
+  });
+export const categoriesQuery = () =>
+  queryOptions({
+    queryKey: ["categories", currentLang()],
+    queryFn: () => getCategoriesFn({ data: currentLang() }) as Promise<Category[]>,
+  });
 export const bannersQuery = queryOptions({
   queryKey: ["banners"],
-  queryFn: async () => {
-    const { data, error } = await supabase.from("banners").select("*").eq("is_active", true).order("sort_order");
-    if (error) throw error;
-    return data;
-  },
+  queryFn: () => getBannersFn(),
 });
 export const settingsQuery = queryOptions({
   queryKey: ["settings"],
-  queryFn: async () => {
-    const { data, error } = await supabase.from("site_settings").select("*").eq("id", 1).maybeSingle();
-    if (error) throw error;
-    return data;
-  },
+  queryFn: () => getSettingsFn() as Promise<SiteSettings>,
+});
+export const sessionQuery = queryOptions({
+  queryKey: ["session"],
+  queryFn: () => getSessionFn(),
 });
 
 // ---------- Cart ----------
@@ -148,31 +135,25 @@ export function useCart() {
   return c;
 }
 
-export type PromoResult = { code: string; discount_usd: number } | null;
-export async function validatePromo(code: string, subtotal: number): Promise<PromoResult> {
-  const { data, error } = await supabase.rpc("validate_promo", { _code: code.trim(), _subtotal: subtotal });
-  if (error || !data || data.length === 0) return null;
-  const r = data[0]!;
-  return { code: r.code, discount_usd: Number(r.discount_usd) };
-}
-
 export function deliveryFee(settings: SiteSettings | null | undefined, governorate: string, fulfillment: string) {
   if (fulfillment === "pickup") return 0;
   const fees = (settings?.delivery_fees ?? {}) as Record<string, number>;
   return Number(fees[governorate] ?? 5);
 }
 
-export function useIsAdmin() {
-  const [state, setState] = useState<{ loading: boolean; admin: boolean; email?: string | undefined }>({ loading: true, admin: false });
+export function useSession() {
+  const [state, setState] = useState<{ loading: boolean; user: SessionUser | null }>({ loading: true, user: null });
   useEffect(() => {
     let alive = true;
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data.user) return alive && setState({ loading: false, admin: false });
-      const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", data.user.id);
-      if (alive) setState({ loading: false, admin: !!roles?.some((r) => r.role === "admin"), email: data.user.email ?? undefined });
-    })();
-    return () => { alive = false; };
+    getSessionFn().then((user) => alive && setState({ loading: false, user }));
+    return () => {
+      alive = false;
+    };
   }, []);
   return state;
+}
+
+export function useIsAdmin() {
+  const { loading, user } = useSession();
+  return { loading, admin: user?.role === "admin", email: user?.email };
 }
