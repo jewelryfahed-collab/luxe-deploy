@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fahed-jewelry",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Bind your D1 database in the Cloudflare dashboard (Workers → Settings → Bindings)
+  // or fill in the database_id below after `wrangler d1 create fahed-jewelry`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fahed-jewelry",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
